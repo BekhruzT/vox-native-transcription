@@ -4,6 +4,14 @@ A Windows desktop speech-to-text tool with real-time transcription streaming. Pr
 
 [![Build Status](https://github.com/bekhruz-ti/vox-native-transcription/actions/workflows/build.yml/badge.svg)](https://github.com/bekhruz-ti/vox-native-transcription/actions)
 
+## Demo
+
+Click the preview to watch the 30-second product demo.
+
+[![Watch the Vox product demo](docs/media/vox-demo-preview.jpg)](https://raw.githubusercontent.com/BekhruzT/vox-native-transcription/main/docs/media/vox-product-demo.mp4)
+
+[Watch the video (MP4)](https://raw.githubusercontent.com/BekhruzT/vox-native-transcription/main/docs/media/vox-product-demo.mp4)
+
 ## Features
 
 - **Global Hotkey** — Press `Win+Alt+J` from anywhere to start/stop recording
