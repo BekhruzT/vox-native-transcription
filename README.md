@@ -8,9 +8,9 @@ A Windows desktop speech-to-text tool with real-time transcription streaming. Pr
 
 Click the preview to watch the 30-second product demo.
 
-[![Watch the Vox product demo](docs/media/vox-demo-preview.jpg)](https://raw.githubusercontent.com/BekhruzT/vox-native-transcription/main/docs/media/vox-product-demo.mp4)
+[![Watch the Vox product demo](docs/media/vox-demo-preview.jpg)](https://cdn.jsdelivr.net/gh/BekhruzT/vox-native-transcription@068deb2/docs/media/vox-product-demo.mp4)
 
-[Watch the video (MP4)](https://raw.githubusercontent.com/BekhruzT/vox-native-transcription/main/docs/media/vox-product-demo.mp4)
+[Watch the video (MP4)](https://cdn.jsdelivr.net/gh/BekhruzT/vox-native-transcription@068deb2/docs/media/vox-product-demo.mp4)
 
 ## Features
 
