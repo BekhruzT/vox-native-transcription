@@ -1,16 +1,4 @@
-"""
-Input STT - Speech-to-Text Desktop Tool
-
-A native Windows STT tool that captures audio and inserts transcribed
-text wherever the cursor is positioned.
-
-Features:
-- Global hotkey activation (default: Ctrl+Shift+Space)
-- Real-time transcription with text injection
-- Automatic silence detection
-- Windows 11-style toast notifications
-- System tray integration
-"""
+"""Windows speech transcription with final clipboard delivery and optional paste."""
 
 __version__ = "0.1.0"
 

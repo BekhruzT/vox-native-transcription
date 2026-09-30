@@ -1,174 +1,96 @@
-"""
-Text injection for simulating keyboard input.
+"""Deliver final transcripts through the clipboard and optional paste shortcut."""
 
-Uses pynput to type text into the currently focused application,
-supporting both complete text injection and incremental (real-time) mode.
-"""
-
+import ctypes
+import sys
 import time
-import threading
-from typing import Optional
+from ctypes import wintypes
 
 from pynput.keyboard import Controller, Key
+from PySide6.QtWidgets import QApplication
+
+
+GMEM_MOVEABLE = 0x0002
+CF_UNICODETEXT = 13
 
 
 class TextInjector:
-    """
-    Injects text into applications by simulating keyboard input.
-    
-    Supports two modes:
-    1. Complete injection: Type entire text at once
-    2. Incremental injection: Type only new characters (for real-time STT)
-    
-    Example:
-        injector = TextInjector()
-        
-        # Complete mode
-        injector.inject("Hello, world!")
-        
-        # Incremental mode (for real-time transcription)
-        injector.inject_incremental("Hello")      # Types "Hello"
-        injector.inject_incremental("Hello, ")    # Types ", "
-        injector.inject_incremental("Hello, world")  # Types "world"
-        injector.reset_incremental()  # Reset for next session
-    """
-    
-    def __init__(self, typing_delay: float = 0.0):
-        """
-        Initialize the text injector.
-        
-        Args:
-            typing_delay: Delay in seconds between characters.
-                         0 = fastest (may cause issues in some apps).
-                         0.001-0.005 = safer for most applications.
-        """
+    """Copy completed text and optionally paste it once."""
+
+    def __init__(self) -> None:
+        """Create the keyboard shortcut controller."""
         self._keyboard = Controller()
-        self._typing_delay = typing_delay
-        self._last_injected_text = ""
-        self._lock = threading.Lock()
-    
-    @property
-    def typing_delay(self) -> float:
-        """Get the current typing delay in seconds."""
-        return self._typing_delay
-    
-    @typing_delay.setter
-    def typing_delay(self, value: float) -> None:
-        """Set the typing delay in seconds."""
-        self._typing_delay = max(0.0, value)
-    
-    def inject(self, text: str) -> None:
-        """
-        Inject complete text by simulating keyboard input.
-        
-        Types the entire text string into the currently focused element.
-        
-        Args:
-            text: The text to type.
-        """
+
+    def deliver(self, text: str, paste: bool) -> bool:
+        """Copy final text and optionally paste into the confirmed target."""
         if not text:
-            return
-        
-        with self._lock:
-            if self._typing_delay > 0:
-                # Type character by character with delay
-                for char in text:
-                    self._type_char(char)
-                    time.sleep(self._typing_delay)
-            else:
-                # Type all at once (fastest)
-                self._keyboard.type(text)
-    
-    def inject_incremental(self, cumulative_text: str) -> str:
-        """
-        Inject only the new portion of text (for real-time mode).
-        
-        Compares the new cumulative text with what was previously injected
-        and types only the difference.
-        
-        Args:
-            cumulative_text: The complete transcription so far.
-        
-        Returns:
-            The delta text that was actually typed.
-        """
-        with self._lock:
-            # Calculate what's new
-            if cumulative_text.startswith(self._last_injected_text):
-                delta = cumulative_text[len(self._last_injected_text):]
-            else:
-                # Text doesn't start with previous - this might be a correction
-                # For now, just type the new parts
-                # More sophisticated handling could use diff algorithms
-                delta = cumulative_text[len(self._last_injected_text):]
-            
-            if delta:
-                # Type the new characters
-                if self._typing_delay > 0:
-                    for char in delta:
-                        self._type_char(char)
-                        time.sleep(self._typing_delay)
-                else:
-                    self._keyboard.type(delta)
-                
-                self._last_injected_text = cumulative_text
-            
-            return delta
-    
-    def reset_incremental(self) -> None:
-        """
-        Reset the incremental injection state.
-        
-        Call this when starting a new recording/transcription session.
-        """
-        with self._lock:
-            self._last_injected_text = ""
-    
-    def _type_char(self, char: str) -> None:
-        """
-        Type a single character.
-        
-        Handles special characters and newlines.
-        
-        Args:
-            char: The character to type.
-        """
-        if char == "\n":
-            self._keyboard.press(Key.enter)
-            self._keyboard.release(Key.enter)
-        elif char == "\t":
-            self._keyboard.press(Key.tab)
-            self._keyboard.release(Key.tab)
-        else:
-            self._keyboard.type(char)
-    
-    def press_key(self, key: Key) -> None:
-        """
-        Press and release a special key.
-        
-        Args:
-            key: The pynput Key to press.
-        """
-        self._keyboard.press(key)
-        self._keyboard.release(key)
-    
-    def backspace(self, count: int = 1) -> None:
-        """
-        Simulate backspace key presses.
-        
-        Useful for correcting text if transcription changes.
-        
-        Args:
-            count: Number of backspaces to send.
-        """
-        for _ in range(count):
-            self.press_key(Key.backspace)
-            if self._typing_delay > 0:
-                time.sleep(self._typing_delay)
-    
-    @property
-    def last_injected_text(self) -> str:
-        """Get the last injected text (for incremental mode)."""
-        return self._last_injected_text
+            return False
+        try:
+            copied = self._copy_to_clipboard(text)
+        except Exception as exc:
+            print(f"[INJECTOR] Clipboard write failed; paste skipped: {exc}")
+            return False
+        if not copied:
+            print("[INJECTOR] Clipboard write failed; paste skipped")
+            return False
+        if not paste:
+            return False
+        try:
+            self._keyboard.press(Key.ctrl)
+            try:
+                self._keyboard.press("v")
+                self._keyboard.release("v")
+            finally:
+                self._keyboard.release(Key.ctrl)
+        except Exception as exc:
+            print(f"[INJECTOR] Paste shortcut failed; transcription remains on clipboard: {exc}")
+            return False
+        return True
 
+    def _copy_to_clipboard(self, text: str) -> bool:
+        """Publish text for other processes before the Qt event loop resumes."""
+        if sys.platform != "win32":
+            clipboard = QApplication.clipboard()
+            clipboard.setText(text)
+            return clipboard.text() == text
 
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.EmptyClipboard.restype = wintypes.BOOL
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.CloseClipboard.restype = wintypes.BOOL
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+
+        buffer = ctypes.create_unicode_buffer(text)
+        handle = kernel32.GlobalAlloc(GMEM_MOVEABLE, ctypes.sizeof(buffer))
+        if not handle:
+            return False
+        try:
+            pointer = kernel32.GlobalLock(handle)
+            if not pointer:
+                return False
+            ctypes.memmove(pointer, buffer, ctypes.sizeof(buffer))
+            kernel32.GlobalUnlock(handle)
+            for _ in range(8):
+                if user32.OpenClipboard(None):
+                    break
+                time.sleep(0.01)
+            else:
+                return False
+            try:
+                if not user32.EmptyClipboard() or not user32.SetClipboardData(CF_UNICODETEXT, handle):
+                    return False
+                handle = None
+                return True
+            finally:
+                user32.CloseClipboard()
+        finally:
+            if handle:
+                kernel32.GlobalFree(handle)

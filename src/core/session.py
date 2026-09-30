@@ -1,23 +1,20 @@
-"""
-Recording session orchestrator.
-
-Coordinates the recording lifecycle, integrating audio recording,
-speech-to-text transcription, silence detection, and text injection.
-"""
+"""Coordinate recording, transcription, and final clipboard delivery."""
 
 import io
-import threading
 import wave
 from enum import Enum, auto
-from typing import Optional, Callable
+from typing import Any, Optional
 
-from PySide6.QtCore import QObject, Signal, QThread, QMutex, QWaitCondition
+from PySide6.QtCore import QObject, Signal, QThread
 
 from ..providers.base import (
+    GenAIProvider,
     RealtimeTranscriptionOutput,
     TranscriptionOutputType,
     TranscriptionStatus,
 )
+from .focus_detector import FocusDetector
+from .text_injector import TextInjector
 
 
 class SessionState(Enum):
@@ -28,12 +25,7 @@ class SessionState(Enum):
 
 
 class RecordingWorker(QThread):
-    """
-    Background worker thread for recording and transcription.
-    
-    Runs the audio recording loop and STT processing in a separate thread
-    to keep the UI responsive.
-    """
+    """Record audio and stream transcription events off the UI thread."""
     
     # Signals
     audio_chunk = Signal(bytes)   # Emitted for each audio chunk
@@ -43,24 +35,14 @@ class RecordingWorker(QThread):
     
     def __init__(
         self,
-        recorder,  # AudioRecorder
-        provider,  # GenAIProvider
-        silence_detector,  # SilenceDetector
+        recorder: Any,
+        provider: GenAIProvider,
+        silence_detector: Any,
         language: Optional[str] = None,
         realtime_mode: bool = True,
         parent: Optional[QObject] = None,
-    ):
-        """
-        Initialize the recording worker.
-        
-        Args:
-            recorder: AudioRecorder instance.
-            provider: GenAIProvider instance for transcription.
-            silence_detector: SilenceDetector instance.
-            language: Language code for transcription.
-            realtime_mode: If True, use real-time transcription.
-            parent: Optional Qt parent.
-        """
+    ) -> None:
+        """Store recording dependencies and options."""
         super().__init__(parent)
         self._recorder = recorder
         self._provider = provider
@@ -69,21 +51,17 @@ class RecordingWorker(QThread):
         self._realtime_mode = realtime_mode
         
         self._stop_requested = False
-        self._mutex = QMutex()
         self._audio_buffer: list[bytes] = []
     
     def run(self) -> None:
         """Main worker thread execution."""
-        print(f"[WORKER] Starting, realtime_mode={self._realtime_mode}")
         try:
             self._stop_requested = False
             self._audio_buffer = []
             self._silence_detector.reset()
             
             # Start recording
-            print("[WORKER] Starting recorder...")
             self._recorder.start()
-            print("[WORKER] Recorder started")
             
             if self._realtime_mode:
                 self._run_realtime()
@@ -97,45 +75,32 @@ class RecordingWorker(QThread):
             self.error.emit(str(e))
         finally:
             # Ensure recorder is stopped
-            print("[WORKER] Stopping recorder...")
             try:
                 self._recorder.stop()
             except Exception:
                 pass
-            print("[WORKER] Emitting finished_recording")
             self.finished_recording.emit()
     
     def _run_realtime(self) -> None:
         """Run real-time transcription mode."""
-        print("[WORKER] Running real-time transcription...")
-        chunk_count = 0
         try:
             # Create a generator that yields audio chunks
             def audio_generator():
-                nonlocal chunk_count
                 for chunk in self._recorder.record():
                     if self._stop_requested:
-                        print(f"[WORKER] Stop requested after {chunk_count} chunks")
                         break
-                    
-                    chunk_count += 1
-                    if chunk_count % 20 == 0:
-                        print(f"[WORKER] Recorded {chunk_count} chunks...")
                     
                     # Emit chunk for other listeners (e.g., silence detector)
                     self.audio_chunk.emit(chunk)
                     
                     # Check for silence
                     if self._silence_detector.feed(chunk):
-                        print(f"[WORKER] Silence detected after {chunk_count} chunks")
                         self._stop_requested = True
                         break
                     
                     yield chunk
             
             # Run transcription - provider now yields RealtimeTranscriptionOutput
-            print("[WORKER] Starting transcription...")
-            text_count = 0
             last_output = None
             for output in self._provider.transcribe_realtime(
                 audio_generator(),
@@ -143,29 +108,20 @@ class RecordingWorker(QThread):
                 chunk_duration=1.5,  # Faster feedback (every 1.5 seconds)
             ):
                 last_output = output
-                text_count += 1
-                status_str = output.status.value if output.status else "None"
-                preview = output.latest_transcription[:50] if output.latest_transcription else ""
-                print(f"[WORKER] Output #{text_count}: status={status_str}, text='{preview}...'")
                 
                 # Always emit the output for UI/session to process
                 self.text_update.emit(output)
                 
                 # Stop after receiving COMPLETE
                 if output.status == TranscriptionStatus.COMPLETE:
-                    print(f"[WORKER] COMPLETE received, breaking loop")
                     break
                     
                 # If stop requested and not complete, break
                 if self._stop_requested:
-                    print(f"[WORKER] Stop requested, breaking loop")
                     break
             
-            print(f"[WORKER] Transcription loop ended, {text_count} updates")
-            
             # If we never got COMPLETE, emit one now with the last known text
-            if last_output and last_output.status != TranscriptionStatus.COMPLETE:
-                print(f"[WORKER] No COMPLETE received, emitting synthetic COMPLETE")
+            if last_output and last_output.status == TranscriptionStatus.IN_PROGRESS:
                 final_output = RealtimeTranscriptionOutput(
                     type=last_output.type,
                     chunks=last_output.chunks.copy(),
@@ -183,18 +139,11 @@ class RecordingWorker(QThread):
     
     def _run_batch(self) -> None:
         """Run batch transcription mode (record first, transcribe after)."""
-        print("[WORKER] Running batch transcription...")
-        chunk_count = 0
         try:
             # Collect all audio
             for chunk in self._recorder.record():
                 if self._stop_requested:
-                    print(f"[WORKER] Stop requested after {chunk_count} chunks")
                     break
-                
-                chunk_count += 1
-                if chunk_count % 20 == 0:
-                    print(f"[WORKER] Recorded {chunk_count} chunks...")
                 
                 self.audio_chunk.emit(chunk)
                 self._audio_buffer.append(chunk)
@@ -207,10 +156,6 @@ class RecordingWorker(QThread):
             # Transcribe collected audio
             if self._audio_buffer:
                 wav_data = self._create_wav(b"".join(self._audio_buffer))
-                
-                # Create temporary file-like object
-                wav_file = io.BytesIO(wav_data)
-                wav_file.name = "recording.wav"
                 
                 # Use batch transcription via temp file approach
                 # For simplicity, write to temp file
@@ -260,29 +205,7 @@ class RecordingWorker(QThread):
 
 
 class RecordingSession(QObject):
-    """
-    Orchestrates the complete recording and transcription workflow.
-    
-    Manages:
-    - Recording lifecycle (start, stop, toggle)
-    - Audio recording via AudioRecorder
-    - Speech-to-text via GenAIProvider
-    - Silence detection
-    - Text injection into the focused application
-    
-    Signals:
-        state_changed: Emitted when session state changes.
-        text_chunk: Emitted for incremental text (real-time mode).
-        transcription_complete: Emitted when transcription finishes.
-        error: Emitted on error.
-    
-    Example:
-        session = RecordingSession(recorder, provider)
-        session.text_chunk.connect(on_text)
-        session.toggle()  # Start recording
-        # ... user speaks ...
-        session.toggle()  # Stop recording
-    """
+    """Coordinate recording, provider output, focus, and final text delivery."""
     
     # Signals
     state_changed = Signal(SessionState)
@@ -292,32 +215,22 @@ class RecordingSession(QObject):
     
     def __init__(
         self,
-        recorder,  # AudioRecorder
-        provider,  # GenAIProvider
-        text_injector=None,   # TextInjector
+        recorder: Any,
+        provider: GenAIProvider,
+        focus_detector: Optional[FocusDetector] = None,
+        text_injector: Optional[TextInjector] = None,
         language: Optional[str] = None,
         silence_threshold_db: float = -40.0,
         silence_duration: float = 2.0,
         realtime_mode: bool = True,
         parent: Optional[QObject] = None,
-    ):
-        """
-        Initialize the recording session.
-        
-        Args:
-            recorder: AudioRecorder instance.
-            provider: GenAIProvider instance.
-            text_injector: Optional TextInjector instance.
-            language: Language code for transcription.
-            silence_threshold_db: Silence detection threshold.
-            silence_duration: Seconds of silence to trigger stop.
-            realtime_mode: If True, use real-time transcription.
-            parent: Optional Qt parent.
-        """
+    ) -> None:
+        """Store dependencies and initialize recording state."""
         super().__init__(parent)
         
         self._recorder = recorder
         self._provider = provider
+        self._focus_detector = focus_detector
         self._text_injector = text_injector
         self._language = language
         self._realtime_mode = realtime_mode
@@ -334,8 +247,8 @@ class RecordingSession(QObject):
         self._state = SessionState.IDLE
         self._worker: Optional[RecordingWorker] = None
         self._last_text = ""
-        self._output_type: Optional[TranscriptionOutputType] = None
         self._final_text = ""
+        self._text_target: Optional[tuple[int, ...]] = None
     
     @property
     def state(self) -> SessionState:
@@ -348,38 +261,23 @@ class RecordingSession(QObject):
         return self._state == SessionState.RECORDING
     
     def toggle(self) -> None:
-        """
-        Toggle recording state.
-        
-        If idle, starts recording.
-        If recording, stops recording.
-        """
+        """Start an idle recording or stop an active one."""
         if self._state == SessionState.IDLE:
             self.start()
         elif self._state == SessionState.RECORDING:
             self.stop()
     
     def start(self) -> None:
-        """
-        Start a new recording session.
-        
-        The transcription is typed into whatever currently has keyboard focus,
-        and mirrored in the toast so it can still be copied by clicking.
-        """
+        """Start recording after capturing the focused text target."""
         if self._state != SessionState.IDLE:
             return
+
+        self._text_target = self._focus_detector.capture_text_target() if self._focus_detector else None
         
         # Reset state
         self._last_text = ""
-        self._output_type = None
         self._final_text = ""
         self._silence_detector.reset()
-        
-        if self._text_injector:
-            self._text_injector.reset_incremental()
-        
-        use_realtime = self._realtime_mode
-        print(f"[SESSION] use_realtime={use_realtime}")
         
         # Create and start worker
         self._worker = RecordingWorker(
@@ -387,7 +285,7 @@ class RecordingSession(QObject):
             provider=self._provider,
             silence_detector=self._silence_detector,
             language=self._language,
-            realtime_mode=use_realtime,
+            realtime_mode=self._realtime_mode,
         )
         
         # Connect signals
@@ -424,44 +322,15 @@ class RecordingSession(QObject):
     
     def _on_text_update(self, output: RealtimeTranscriptionOutput) -> None:
         """Handle transcription output from worker."""
-        self._output_type = output.type
         self._last_text = output.latest_transcription
-        
-        # Debug logging
-        status_str = output.status.value if output.status else "None"
-        type_str = output.type.value if output.type else "None"
-        print(f"[SESSION] Received: type={type_str}, status={status_str}, "
-              f"text='{output.latest_transcription[:30] if output.latest_transcription else ''}...'")
         
         # Emit for UI (toast updates)
         self.text_chunk.emit(output)
-        
-        # Handle text injection based on output type
-        if self._text_injector:
-            if output.type == TranscriptionOutputType.CUMULATIVE:
-                # CUMULATIVE: ONLY inject on COMPLETE - no live updates
-                if output.status == TranscriptionStatus.COMPLETE:
-                    final_text = output.final_transcription or output.latest_transcription or ""
-                    if final_text:
-                        print(f"[SESSION] Injecting final CUMULATIVE text: '{final_text[:50]}...'")
-                        self._text_injector.inject(final_text)
-                else:
-                    print(f"[SESSION] CUMULATIVE IN_PROGRESS - not injecting (waiting for COMPLETE)")
-            else:  # INCREMENTAL
-                # INCREMENTAL: Append the newest chunk immediately (live updates)
-                if output.chunks:
-                    newest_chunk = output.chunks[-1]
-                    if newest_chunk:
-                        print(f"[SESSION] Injecting INCREMENTAL chunk: '{newest_chunk}'")
-                        self._text_injector.inject(newest_chunk)
         
         # Track completion
         if output.status == TranscriptionStatus.COMPLETE:
             # Use final_transcription if available, otherwise latest_transcription
             self._final_text = output.final_transcription or output.latest_transcription or ""
-            print(f"[SESSION] COMPLETE received, final_text='{self._final_text[:50] if self._final_text else ''}...'")
-        elif output.status == TranscriptionStatus.ERROR:
-            print(f"[SESSION] ERROR status received")
     
     def _on_recording_finished(self) -> None:
         """Handle recording completion."""
@@ -470,14 +339,18 @@ class RecordingSession(QObject):
         
         # Use final_text if available, otherwise last_text
         final_text = self._final_text or self._last_text or ""
+
+        if self._final_text and self._text_injector:
+            paste = self._text_target is not None and self._focus_detector is not None and self._focus_detector.is_same_text_target(self._text_target)
+            self._text_injector.deliver(final_text, paste=paste)
         
         # Always emit completion (even if empty - UI will show "No Audio Detected")
         self.transcription_complete.emit(final_text)
         
         # Clean up
         self._worker = None
-        self._output_type = None
         self._final_text = ""
+        self._text_target = None
         self._set_state(SessionState.IDLE)
     
     def _on_error(self, message: str) -> None:

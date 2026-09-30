@@ -1,6 +1,6 @@
 # Vox Native Transcription
 
-A Windows desktop speech-to-text tool with real-time transcription streaming. Press a hotkey, speak, and your words appear as text — either typed directly into the focused application or shown in a floating toast notification.
+A Windows desktop speech-to-text tool with real-time transcription streaming. Press a hotkey and speak; the final result is copied to the clipboard and pasted into a confirmed focused text field.
 
 [![Build Status](https://github.com/bekhruz-ti/vox-native-transcription/actions/workflows/build.yml/badge.svg)](https://github.com/bekhruz-ti/vox-native-transcription/actions)
 
@@ -8,9 +8,9 @@ A Windows desktop speech-to-text tool with real-time transcription streaming. Pr
 
 - **Global Hotkey** — Press `Win+Alt+J` from anywhere to start/stop recording
 - **Real-time Streaming** — See your words transcribed as you speak
-- **Text Injection** — Types the transcription into whatever has keyboard focus
+- **Text Delivery** — Copies the final transcription and pastes into a confirmed focused text field
 - **Floating Toast** — Beautiful notification showing live transcription
-- **Click to Copy** — When no text field is focused, click the toast to copy
+- **Manual Paste** — When no text field is confirmed, select a destination and press `Ctrl+V`
 - **System Tray** — Runs quietly in the background
 - **Multiple Providers** — Supports ElevenLabs and OpenAI transcription APIs
 
@@ -63,23 +63,21 @@ Launch `Vox.exe`. You'll see a waveform icon appear in your system tray.
 | **Start Recording** | Press `Win+Alt+J` or double-click the tray icon |
 | **Stop Recording** | Press `Win+Alt+J` again |
 | **Copy Transcription** | Click the toast notification |
-| **Where text goes** | Typed into whatever has keyboard focus |
+| **Where text goes** | Clipboard, plus automatic paste into a confirmed focused text field |
 | **Open Settings** | Right-click tray icon → Settings |
 | **Exit** | Right-click tray icon → Exit |
 
-### Text Injection
+### Text Delivery
 
-The transcription is typed into whatever currently has keyboard focus, and is
-simultaneously shown in the toast so you can click it to copy instead.
+Vox shows live transcription in the toast. When recording finishes, it copies the
+complete result to the clipboard. If the text field focused when recording began
+is still focused, Vox pastes the result into it in one operation. The result stays
+on the clipboard so `Ctrl+V` can paste it again.
 
-Vox does not try to detect whether the focused element accepts text. UI Automation
-cannot reliably classify modern editors — Chromium and Electron text areas (Chrome,
-VS Code, Slack, Discord, and any web `contenteditable`) report as `GroupControl` or
-`PaneControl` rather than `EditControl`. Guessing meant text silently went nowhere in
-those apps, so Vox now always types, like the built-in Windows dictation does.
-
-The trade-off: if you trigger the hotkey while a non-text window has focus, the
-keystrokes go to that window and may activate its single-key shortcuts.
+If no text field was selected or focus changed, Vox sends no paste shortcut. Select
+a destination and press `Ctrl+V`; clicking the toast also copies its full result.
+Some Chromium and Electron editors do not identify their text fields reliably to
+Windows UI Automation, so they may use this manual paste fallback.
 
 ## Configuration
 
@@ -145,7 +143,7 @@ To create the installer (requires [Inno Setup](https://jrsoftware.org/isdl.php))
 
 ## Known Limitations
 
-- **Windows only** — Uses Windows-specific APIs for text injection and UI automation
+- **Windows only** — Uses Windows-specific APIs for focus detection and paste shortcuts
 - **Admin may be required** — Global hotkeys work best when running as administrator
 - **API key required** — Transcription requires a valid ElevenLabs or OpenAI API key
 

@@ -1,12 +1,4 @@
-"""
-Core module for Input-STT application.
-
-Contains the main business logic components:
-- HotkeyManager: Global keyboard shortcut handling
-- RecordingSession: Recording lifecycle orchestration
-- SilenceDetector: Audio silence detection
-- TextInjector: Keyboard simulation for text input
-"""
+"""Core hotkey, recording, silence detection, and clipboard delivery components."""
 
 from .hotkey_manager import HotkeyManager
 from .silence_detector import SilenceDetector

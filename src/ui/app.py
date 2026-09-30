@@ -1,8 +1,4 @@
-"""
-Main application class for Input-STT.
-
-Coordinates all components and manages the application lifecycle.
-"""
+"""Coordinate Vox's providers, recording session, hotkeys, and tray UI."""
 
 import sys
 from typing import Optional
@@ -12,6 +8,7 @@ from PySide6.QtCore import QObject, Signal, Slot
 
 from ..config.settings import Settings
 from ..core.hotkey_manager import HotkeyManager
+from ..core.focus_detector import FocusDetector
 from ..core.session import RecordingSession, SessionState
 from ..core.text_injector import TextInjector
 from ..audio.recorder import AudioRecorder
@@ -23,27 +20,14 @@ from .system_tray import SystemTray
 
 
 class STTApplication(QObject):
-    """
-    Main application coordinator for Input-STT.
-    
-    Manages:
-    - System tray icon
-    - Global hotkey registration
-    - Recording session lifecycle
-    - UI overlays (mic indicator, toast)
-    
-    Signals:
-        recording_started: Emitted when recording begins.
-        recording_stopped: Emitted when recording ends.
-        text_ready: Emitted with transcribed text.
-    """
+    """Manage the desktop application's recording and UI lifecycle."""
     
     # Signals
     recording_started = Signal()
     recording_stopped = Signal()
     text_ready = Signal(str)
     
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: Optional[QObject] = None) -> None:
         """Initialize the application."""
         super().__init__(parent)
         
@@ -57,7 +41,8 @@ class STTApplication(QObject):
         self._recorder: Optional[AudioRecorder] = None
         self._provider = None
         
-        self._text_injector = TextInjector(typing_delay=0.001)
+        self._focus_detector = FocusDetector()
+        self._text_injector = TextInjector()
         
         # Overlay windows (lazy initialization)
         self._mic_indicator = None
@@ -77,12 +62,7 @@ class STTApplication(QObject):
         return self._session is not None and self._session.is_recording
     
     def initialize(self) -> bool:
-        """
-        Initialize all application components.
-        
-        Returns:
-            True if initialization succeeded, False otherwise.
-        """
+        """Initialize providers, hotkeys, tray, and overlays."""
         if self._is_initialized:
             return True
         
@@ -95,15 +75,13 @@ class STTApplication(QObject):
             # Try ElevenLabs first (better real-time streaming)
             try:
                 self._provider = ElevenLabsProvider()
-                print(f"[DEBUG] Using ElevenLabs provider")
             except Exception as e:
-                print(f"[DEBUG] ElevenLabs not available: {e}")
+                print(f"ElevenLabs unavailable: {e}")
 
             # Fall back to OpenAI
             if not self._provider:
                 try:
                     self._provider = OpenAIProvider()
-                    print(f"[DEBUG] Using OpenAI provider")
                 except ValueError as e:
                     print(f"Warning: No STT provider configured: {e}")
                     self._provider = None
@@ -156,6 +134,7 @@ class STTApplication(QObject):
         session = RecordingSession(
             recorder=self._recorder,
             provider=self._provider,
+            focus_detector=self._focus_detector,
             text_injector=self._text_injector,
             language=self._settings.get("language", "en"),
             silence_threshold_db=-45.0,  # Less sensitive (was -40)
@@ -188,25 +167,21 @@ class STTApplication(QObject):
     def _start_recording(self) -> None:
         """Start a new recording."""
         try:
-            print("[DEBUG] Starting recording...")
-            
             # Create new session
             self._session = self._create_session()
-            print(f"[DEBUG] Session created (text_field_mode will be determined on start)")
             
+            # Capture focus before the toast appears.
+            self._session.start()
+
             # Show "Listening..." toast
             if self._toast:
                 self._toast.show_listening()
-                print("[DEBUG] Listening toast shown")
             
             # Update tray
             if self._system_tray:
                 self._system_tray.set_recording_state(True)
             
-            # Start recording
-            self._session.start()
             self.recording_started.emit()
-            print("[DEBUG] Recording started")
             
         except Exception as e:
             print(f"[ERROR] Failed to start recording: {e}")
@@ -222,8 +197,6 @@ class STTApplication(QObject):
     @Slot(SessionState)
     def _on_session_state_changed(self, state: SessionState) -> None:
         """Handle session state changes."""
-        print(f"[DEBUG] Session state changed: {state}")
-        
         if self._system_tray:
             if state == SessionState.RECORDING:
                 self._system_tray.set_recording_state(True)
@@ -241,9 +214,6 @@ class STTApplication(QObject):
     @Slot(object)
     def _on_text_chunk(self, output: RealtimeTranscriptionOutput) -> None:
         """Handle real-time transcription output."""
-        preview = output.latest_transcription[:50] if output.latest_transcription else ""
-        print(f"[DEBUG] Text chunk: status={output.status}, text='{preview}...'")
-        
         # Update toast in real-time
         if self._toast:
             self._toast.update_transcription(output)
@@ -251,14 +221,9 @@ class STTApplication(QObject):
     @Slot(str)
     def _on_transcription_complete(self, text: str) -> None:
         """Handle transcription session completion."""
-        display_text = text[:100] + "..." if len(text) > 100 else text
-        print(f"[DEBUG] Transcription complete: '{display_text}' ({len(text)} chars)")
-        
         # Emit for external listeners
         self.text_ready.emit(text)
         
-        # Toast is already updated via _on_text_chunk with COMPLETE status
-        print("[DEBUG] Text injected into the focused window; toast can be clicked to copy")
     
     @Slot(str)
     def _on_session_error(self, message: str) -> None:
@@ -317,12 +282,7 @@ class STTApplication(QObject):
 
 
 def run_application() -> int:
-    """
-    Run the Input-STT application.
-    
-    Returns:
-        Exit code.
-    """
+    """Run the Vox Qt event loop and return its exit code."""
     # Create Qt application
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # Keep running with just tray

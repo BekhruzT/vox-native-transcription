@@ -131,6 +131,9 @@ a = Analysis(
     noarchive=False,
 )
 
+# Development-tool DLLs found on PATH are not application dependencies.
+a.binaries = [entry for entry in a.binaries if 'codex-runtimes' not in entry[1].lower()]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
