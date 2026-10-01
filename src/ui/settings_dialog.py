@@ -252,6 +252,9 @@ class SettingsDialog(QDialog):
                 hwnd = ctypes.c_void_p(int(self.winId()))
                 if dwm(hwnd, 20, ctypes.byref(enabled), ctypes.sizeof(enabled)) != 0:
                     dwm(hwnd, 19, ctypes.byref(enabled), ctypes.sizeof(enabled))
+                # COLORREF stores the dialog's #161920 background as 0x00BBGGRR.
+                caption_color = ctypes.c_uint32(0x00201916)
+                dwm(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
             except (AttributeError, OSError):
                 pass
         
