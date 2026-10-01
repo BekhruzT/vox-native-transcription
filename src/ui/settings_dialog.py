@@ -6,19 +6,76 @@ Allows users to configure hotkey bindings and other settings.
 
 import ctypes
 import sys
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QGroupBox,
+    QPushButton, QLineEdit, QWidget,
     QMessageBox
 )
-from PySide6.QtGui import QIcon, QKeySequence
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QKeySequence, QPaintEvent, QPainter, QPainterPath, QPen
+from PySide6.QtCore import Qt, Signal, QSize
 
 from ..config.settings import Settings
 from ..core.hotkey_manager import HotkeyManager
 from .system_tray import SystemTray, render_waveform_pixmap
+
+
+@lru_cache(maxsize=1)
+def _dialog_font_family() -> Optional[str]:
+    """Load the bundled dialog font once per process."""
+    font_path = Path(__file__).resolve().parent / "resources" / "fonts" / "BalsamiqSans-Regular.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
+    return families[0] if families else None
+
+
+class InkPanel(QWidget):
+    """Paint the softly offset, irregular outline around Hotkey settings."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Draw the slate panel and its faint second contour."""
+        bounds = self.rect().adjusted(2, 2, -6, -6)
+        left, top, right, bottom = map(float, (bounds.left(), bounds.top(), bounds.right(), bounds.bottom()))
+        outline = QPainterPath()
+        outline.moveTo(left + 14, top)
+        outline.lineTo(right - 11, top + 1)
+        outline.quadTo(right, top, right, top + 12)
+        outline.lineTo(right - 1, bottom - 13)
+        outline.quadTo(right, bottom, right - 13, bottom)
+        outline.lineTo(left + 11, bottom - 1)
+        outline.quadTo(left, bottom, left, bottom - 11)
+        outline.lineTo(left + 1, top + 13)
+        outline.quadTo(left, top, left + 14, top)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setBrush(Qt.NoBrush)
+        painter.setPen(QPen(QColor(105, 152, 238, 92), 1))
+        painter.drawPath(outline.translated(3, 3))
+        painter.setBrush(QColor("#20293a"))
+        painter.setPen(QPen(QColor("#566b91"), 2))
+        painter.drawPath(outline)
+
+
+class WaveFlourish(QWidget):
+    """Show a small hand-drawn blue wave beside the Hotkey heading."""
+
+    def sizeHint(self) -> QSize:
+        """Reserve room for the wave without affecting the heading baseline."""
+        return QSize(30, 20)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Draw a restrained two-crest wave."""
+        wave = QPainterPath()
+        wave.moveTo(1, 11)
+        wave.cubicTo(6, 2, 9, 17, 15, 9)
+        wave.cubicTo(20, 2, 24, 13, 29, 5)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor("#79aaff"), 2, Qt.SolidLine, Qt.RoundCap))
+        painter.drawPath(wave)
 
 
 class HotkeyEdit(QLineEdit):
@@ -72,7 +129,7 @@ class HotkeyEdit(QLineEdit):
                 background: #161920;
                 color: #eceff4;
                 padding: 8px;
-                border-radius: 4px;
+                border-radius: 8px;
             }
         """)
         self.setText("Press key combination...")
@@ -83,11 +140,11 @@ class HotkeyEdit(QLineEdit):
         self._is_capturing = False
         self.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #52617c;
+                border: 2px solid #71a3fa;
                 background: #161920;
                 color: #eceff4;
                 padding: 8px;
-                border-radius: 4px;
+                border-radius: 8px;
             }
         """)
         if self._hotkey:
@@ -183,6 +240,10 @@ class SettingsDialog(QDialog):
         self.setWindowIcon(QIcon(render_waveform_pixmap(48, SystemTray.COLOR_IDLE, SystemTray.BG_COLOR)))
         self.setMinimumWidth(440)
         self.setModal(True)
+        if font_family := _dialog_font_family():
+            font = QFont(font_family)
+            font.setPixelSize(14)
+            self.setFont(font)
 
         if sys.platform == "win32":
             try:
@@ -201,18 +262,9 @@ class SettingsDialog(QDialog):
             QLabel {
                 color: #eceff4;
             }
-            QGroupBox {
-                color: #eceff4;
-                background: #1e2639;
-                border: 1px solid #3c4a64;
-                border-radius: 8px;
-                margin-top: 14px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+            QLabel#hotkeyTitle {
+                font-size: 22px;
+                color: #f2f4fa;
             }
             QPushButton {
                 background: #2d3a53;
@@ -247,20 +299,29 @@ class SettingsDialog(QDialog):
         layout.setSpacing(16)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        hotkey_group = QGroupBox("Hotkey")
-        hotkey_layout = QVBoxLayout(hotkey_group)
+        hotkey_panel = InkPanel()
+        hotkey_layout = QVBoxLayout(hotkey_panel)
         hotkey_layout.setSpacing(8)
-        hotkey_layout.setContentsMargins(16, 18, 16, 16)
+        hotkey_layout.setContentsMargins(19, 17, 19, 18)
+
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(7)
+        title = QLabel("Hotkey")
+        title.setObjectName("hotkeyTitle")
+        title_layout.addWidget(title)
+        title_layout.addWidget(WaveFlourish())
+        title_layout.addStretch()
+        hotkey_layout.addLayout(title_layout)
         
         self._hotkey_edit = HotkeyEdit()
         self._hotkey_edit.set_hotkey(self._original_hotkey)
         self._hotkey_edit.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #52617c;
+                border: 2px solid #71a3fa;
                 background: #161920;
                 color: #eceff4;
                 padding: 8px;
-                border-radius: 4px;
+                border-radius: 8px;
             }
         """)
         
@@ -270,10 +331,10 @@ class SettingsDialog(QDialog):
         
         help_label = QLabel("Click the field and press your desired key combination")
         help_label.setWordWrap(True)
-        help_label.setStyleSheet("color: #b4c0d5; font-size: 11px;")
+        help_label.setStyleSheet("color: #b5c2d9; font-size: 12px;")
         hotkey_layout.addWidget(help_label)
         
-        layout.addWidget(hotkey_group)
+        layout.addWidget(hotkey_panel)
         
         layout.addStretch()
         

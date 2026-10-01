@@ -69,6 +69,8 @@ version = get_version()
 # Data files to include
 datas = [
     ('src/ui/resources/style.qss', 'src/ui/resources'),
+    ('src/ui/resources/fonts/BalsamiqSans-Regular.ttf', 'src/ui/resources/fonts'),
+    ('src/ui/resources/fonts/OFL.txt', 'src/ui/resources/fonts'),
 ]
 
 # Hidden imports that PyInstaller might miss
