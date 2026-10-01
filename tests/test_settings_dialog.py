@@ -67,7 +67,7 @@ class SettingsDialogTests(unittest.TestCase):
         host_ratio = self.app.primaryScreen().devicePixelRatio() / float(os.environ.get("QT_SCALE_FACTOR", "1"))
         env = dict(os.environ, QT_SCALE_FACTOR=str(target / host_ratio), VOX_DIALOG_SCALE_CHILD="1")
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", self.id(), "-v"],
+            [sys.executable, "-m", "unittest", f"tests.test_settings_dialog.SettingsDialogTests.{self._testMethodName}", "-v"],
             cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
