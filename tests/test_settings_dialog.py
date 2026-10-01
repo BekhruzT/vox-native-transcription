@@ -50,17 +50,27 @@ class SettingsDialogTests(unittest.TestCase):
         self.app.processEvents()
         self.addCleanup(self.dialog.close)
 
-    def _helper(self) -> QLabel:
-        """Find the visible instruction under the capture field."""
-        return next(label for label in self.dialog.findChildren(QLabel) if label.text().startswith("Click the field"))
-
     def _assert_helper_fits(self) -> None:
         """Check rendered text height and client geometry."""
-        helper = self._helper()
+        helper = next(label for label in self.dialog.findChildren(QLabel) if label.text().startswith("Click the field"))
         text_height = QFontMetrics(helper.font()).boundingRect(0, 0, helper.width(), 1000, Qt.TextWordWrap, helper.text()).height()
         self.assertGreaterEqual(helper.height(), text_height, f"helper height {helper.height()} < required text height {text_height}")
         self.assertLessEqual(helper.mapTo(self.dialog, helper.rect().bottomRight()).y(), self.dialog.contentsRect().bottom(), "helper extends below client area")
         self.assertLessEqual(helper.mapTo(self.dialog, helper.rect().bottomRight()).x(), self.dialog.contentsRect().right(), "helper extends beyond client width")
+
+    def _assert_helper_at_scale(self, target: float) -> None:
+        """Check helper geometry in a process with the requested effective Qt scale."""
+        if os.environ.get("VOX_DIALOG_SCALE_CHILD") == "1":
+            self.assertAlmostEqual(self.app.primaryScreen().devicePixelRatio(), target, delta=0.02)
+            self._assert_helper_fits()
+            return
+        host_ratio = self.app.primaryScreen().devicePixelRatio() / float(os.environ.get("QT_SCALE_FACTOR", "1"))
+        env = dict(os.environ, QT_SCALE_FACTOR=str(target / host_ratio), VOX_DIALOG_SCALE_CHILD="1")
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", self.id(), "-v"],
+            cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_dialog_uses_vox_identity_and_focus_palette(self) -> None:
         """The dialog presents Vox branding and a clear blue capture focus."""
@@ -87,8 +97,8 @@ class SettingsDialogTests(unittest.TestCase):
 
     def test_helper_fits_default_dialog_at_100_percent(self) -> None:
         """The full helper sentence fits at the baseline scale."""
-        self.assertEqual(self._helper().text(), "Click the field and press your desired key combination")
-        self._assert_helper_fits()
+        self.assertEqual(next(label for label in self.dialog.findChildren(QLabel) if label.text().startswith("Click the field")).text(), "Click the field and press your desired key combination")
+        self._assert_helper_at_scale(1.0)
 
     def test_save_hover_retains_legible_contrast(self) -> None:
         """The Save hover color keeps its white label readable."""
@@ -103,16 +113,7 @@ class SettingsDialogTests(unittest.TestCase):
 
     def test_helper_fits_default_dialog_at_125_percent(self) -> None:
         """The full helper sentence fits when Qt scales the entire dialog."""
-        if os.environ.get("VOX_DIALOG_SCALE_CHILD") == "1":
-            self.assertEqual(os.environ["QT_SCALE_FACTOR"], "1.25")
-            self._assert_helper_fits()
-            return
-        env = dict(os.environ, QT_SCALE_FACTOR="1.25", VOX_DIALOG_SCALE_CHILD="1")
-        result = subprocess.run(
-            [sys.executable, "-m", "unittest", "tests.test_settings_dialog.SettingsDialogTests.test_helper_fits_default_dialog_at_125_percent", "-v"],
-            cwd=Path(__file__).resolve().parents[1], env=env, capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self._assert_helper_at_scale(1.25)
 
     def test_capture_and_save_preserve_behavior(self) -> None:
         """Saving a captured combination registers and persists it."""
