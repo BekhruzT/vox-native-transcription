@@ -4,18 +4,21 @@ Settings dialog for Input-STT.
 Allows users to configure hotkey bindings and other settings.
 """
 
+import ctypes
+import sys
 from typing import Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QFormLayout, QGroupBox,
+    QPushButton, QLineEdit, QGroupBox,
     QMessageBox
 )
-from PySide6.QtGui import QKeySequence, QFont
+from PySide6.QtGui import QIcon, QKeySequence
 from PySide6.QtCore import Qt, Signal
 
 from ..config.settings import Settings
 from ..core.hotkey_manager import HotkeyManager
+from .system_tray import SystemTray, render_waveform_pixmap
 
 
 class HotkeyEdit(QLineEdit):
@@ -65,9 +68,9 @@ class HotkeyEdit(QLineEdit):
         self._key = ""
         self.setStyleSheet("""
             QLineEdit {
-                border: 2px solid #60CDFF;
-                background: #2D2D2D;
-                color: white;
+                border: 2px solid #2e6cff;
+                background: #161920;
+                color: #eceff4;
                 padding: 8px;
                 border-radius: 4px;
             }
@@ -80,9 +83,9 @@ class HotkeyEdit(QLineEdit):
         self._is_capturing = False
         self.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #3D3D3D;
-                background: #2D2D2D;
-                color: white;
+                border: 1px solid #52617c;
+                background: #161920;
+                color: #eceff4;
                 padding: 8px;
                 border-radius: 4px;
             }
@@ -176,24 +179,35 @@ class SettingsDialog(QDialog):
         self._hotkey_manager = hotkey_manager
         self._original_hotkey = settings.get("hotkey", "<cmd>+<alt>+j")
         
-        self.setWindowTitle("Input-STT Settings")
-        self.setFixedSize(400, 200)
+        self.setWindowTitle("Vox Settings")
+        self.setWindowIcon(QIcon(render_waveform_pixmap(48, SystemTray.COLOR_IDLE, SystemTray.BG_COLOR)))
+        self.setMinimumWidth(440)
         self.setModal(True)
+
+        if sys.platform == "win32":
+            try:
+                enabled = ctypes.c_int(1)
+                dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+                hwnd = ctypes.c_void_p(int(self.winId()))
+                if dwm(hwnd, 20, ctypes.byref(enabled), ctypes.sizeof(enabled)) != 0:
+                    dwm(hwnd, 19, ctypes.byref(enabled), ctypes.sizeof(enabled))
+            except (AttributeError, OSError):
+                pass
         
-        # Apply dark theme
         self.setStyleSheet("""
             QDialog {
-                background: #1F1F1F;
+                background: #161920;
             }
             QLabel {
-                color: white;
+                color: #eceff4;
             }
             QGroupBox {
-                color: white;
-                border: 1px solid #3D3D3D;
-                border-radius: 4px;
-                margin-top: 12px;
-                padding-top: 8px;
+                color: #eceff4;
+                background: #1e2639;
+                border: 1px solid #3c4a64;
+                border-radius: 8px;
+                margin-top: 14px;
+                padding-top: 10px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
@@ -201,28 +215,31 @@ class SettingsDialog(QDialog):
                 padding: 0 5px;
             }
             QPushButton {
-                background: #3D3D3D;
-                color: white;
-                border: none;
-                border-radius: 4px;
+                background: #2d3a53;
+                color: #eceff4;
+                border: 1px solid #52617c;
+                border-radius: 5px;
                 padding: 8px 16px;
             }
             QPushButton:hover {
-                background: #4D4D4D;
+                background: #3c4e6e;
             }
             QPushButton:pressed {
-                background: #5D5D5D;
+                background: #26344c;
             }
             QPushButton#saveButton {
-                background: #60CDFF;
-                color: black;
+                background: #2e6cff;
+                color: #ffffff;
+                border-color: #2e6cff;
             }
             QPushButton#saveButton:hover {
-                background: #80DDFF;
+                background: #2563eb;
             }
+            QPushButton#saveButton:pressed { background: #2255d7; }
         """)
         
         self._setup_ui()
+        self.resize(460, self.sizeHint().height())
     
     def _setup_ui(self) -> None:
         """Setup the dialog UI."""
@@ -230,29 +247,31 @@ class SettingsDialog(QDialog):
         layout.setSpacing(16)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Hotkey group
         hotkey_group = QGroupBox("Hotkey")
-        hotkey_layout = QFormLayout(hotkey_group)
+        hotkey_layout = QVBoxLayout(hotkey_group)
+        hotkey_layout.setSpacing(8)
+        hotkey_layout.setContentsMargins(16, 18, 16, 16)
         
         self._hotkey_edit = HotkeyEdit()
         self._hotkey_edit.set_hotkey(self._original_hotkey)
         self._hotkey_edit.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #3D3D3D;
-                background: #2D2D2D;
-                color: white;
+                border: 1px solid #52617c;
+                background: #161920;
+                color: #eceff4;
                 padding: 8px;
                 border-radius: 4px;
             }
         """)
         
         hotkey_label = QLabel("Toggle Recording:")
-        hotkey_layout.addRow(hotkey_label, self._hotkey_edit)
+        hotkey_layout.addWidget(hotkey_label)
+        hotkey_layout.addWidget(self._hotkey_edit)
         
-        # Help text
         help_label = QLabel("Click the field and press your desired key combination")
-        help_label.setStyleSheet("color: #808080; font-size: 11px;")
-        hotkey_layout.addRow("", help_label)
+        help_label.setWordWrap(True)
+        help_label.setStyleSheet("color: #b4c0d5; font-size: 11px;")
+        hotkey_layout.addWidget(help_label)
         
         layout.addWidget(hotkey_group)
         
