@@ -13,6 +13,8 @@ Version is auto-detected from:
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 
 def get_version():
@@ -133,8 +135,18 @@ a = Analysis(
     noarchive=False,
 )
 
-# Development-tool DLLs found on PATH are not application dependencies.
-a.binaries = [entry for entry in a.binaries if 'codex-runtimes' not in entry[1].lower()]
+# Use Python's own DLL when a development runtime shadows it on PATH.
+resolved_binaries = []
+for entry in a.binaries:
+    if 'codex-runtimes' not in entry[1].lower():
+        resolved_binaries.append(entry)
+        continue
+    for base_dir in (Path(sys.base_prefix) / 'DLLs', Path(sys.base_prefix)):
+        candidate = base_dir / Path(entry[0]).name
+        if candidate.is_file():
+            resolved_binaries.append((entry[0], str(candidate), entry[2]))
+            break
+a.binaries = resolved_binaries
 
 pyz = PYZ(a.pure)
 
