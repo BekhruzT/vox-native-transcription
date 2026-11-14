@@ -7,7 +7,7 @@ the application and accessing settings.
 
 from typing import Optional
 
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QPen
 from PySide6.QtCore import QObject, Signal, QTimer, Qt, QSize
 
@@ -77,12 +77,16 @@ class SystemTray(QSystemTrayIcon):
     Signals:
         toggle_recording_requested: User wants to start/stop recording.
         settings_requested: User wants to open settings.
+        clear_history_requested: User wants to forget saved transcriptions.
+        save_history_toggled: User turned saving history on or off.
         exit_requested: User wants to exit the application.
     """
     
     # Signals
     toggle_recording_requested = Signal()
     settings_requested = Signal()
+    clear_history_requested = Signal()
+    save_history_toggled = Signal(bool)
     exit_requested = Signal()
     
     # Icon colors (matching toast design)
@@ -92,8 +96,8 @@ class SystemTray(QSystemTrayIcon):
     COLOR_PROCESSING = QColor(46, 108, 255)    # Blue
     BG_COLOR = QColor(30, 38, 57)              # #1e2639 - Dark circle bg
     
-    def __init__(self, parent: Optional[QObject] = None):
-        """Initialize the system tray."""
+    def __init__(self, parent: Optional[QObject] = None, save_history: bool = True) -> None:
+        """Initialize the system tray with Save history checked or not."""
         super().__init__(parent)
         
         self._is_recording = False
@@ -111,7 +115,7 @@ class SystemTray(QSystemTrayIcon):
         self.setToolTip("Input-STT - Press hotkey to record")
         
         # Create context menu
-        self._create_menu()
+        self._create_menu(save_history)
         
         # Pulse animation timer
         self._pulse_timer = QTimer(self)
@@ -133,13 +137,25 @@ class SystemTray(QSystemTrayIcon):
         """
         return QIcon(render_waveform_pixmap(size, color, self.BG_COLOR))
     
-    def _create_menu(self) -> None:
-        """Create the context menu."""
+    def _create_menu(self, save_history: bool) -> None:
+        """Create the context menu with Save history checked or not."""
         menu = QMenu()
         
         # Start/Stop recording action
         self._action_toggle = menu.addAction("Start Recording")
         self._action_toggle.triggered.connect(self._on_toggle_clicked)
+        
+        menu.addSeparator()
+        
+        # History actions
+        self._menu_recent = menu.addMenu("Recent")
+        self.set_recent([])
+        action_clear = menu.addAction("Clear history")
+        action_clear.triggered.connect(self.clear_history_requested.emit)
+        action_save = menu.addAction("Save history")
+        action_save.setCheckable(True)
+        action_save.setChecked(save_history)
+        action_save.triggered.connect(self.save_history_toggled)
         
         menu.addSeparator()
         
@@ -154,6 +170,16 @@ class SystemTray(QSystemTrayIcon):
         action_exit.triggered.connect(self.exit_requested.emit)
         
         self.setContextMenu(menu)
+    
+    def set_recent(self, texts: list[str]) -> None:
+        """Rebuild Recent so each entry previews on one line and copies its full text."""
+        self._menu_recent.clear()
+        for text in texts:
+            preview = " ".join(text.split())
+            # Qt treats a single & as a mnemonic marker, so it must be doubled to show literally.
+            action = self._menu_recent.addAction((preview if len(preview) <= 60 else preview[:59] + "…").replace("&", "&&"))
+            action.triggered.connect(lambda _checked=False, full=text: QApplication.clipboard().setText(full))
+        self._menu_recent.setEnabled(bool(texts))
     
     def set_recording_state(self, is_recording: bool) -> None:
         """

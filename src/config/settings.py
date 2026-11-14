@@ -33,6 +33,7 @@ class Settings:
         "hotkey": "<cmd>+<alt>+j",
         "audio_device": None,
         "language": "en",
+        "save_history": True,
     }
     
     def __init__(self, config_dir: Optional[Path] = None):
