@@ -309,7 +309,6 @@ class RecordingSession(QObject):
     def cancel(self) -> None:
         """Cancel the current recording without processing."""
         if self._worker:
-            self._worker.finished_recording.disconnect(self._on_recording_finished)
             self._worker.request_stop()
         
         self._set_state(SessionState.IDLE)
@@ -335,6 +334,9 @@ class RecordingSession(QObject):
     
     def _on_recording_finished(self) -> None:
         """Handle recording completion."""
+        # Cancel and error drop the worker before its thread emits this finish signal.
+        if self._worker is None:
+            return
         # Brief processing state
         self._set_state(SessionState.PROCESSING)
         
