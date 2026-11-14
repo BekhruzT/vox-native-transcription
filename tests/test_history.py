@@ -130,26 +130,25 @@ class AppHistoryTests(unittest.TestCase):
         self.stt = STTApplication()
         self.assertTrue(self.stt.initialize())
         self.session = self.stt._create_session()
-        self.tray = self.stt._system_tray
 
     def test_completed_transcription_is_first_recent_entry(self) -> None:
         """Finishing a dictation puts its text at the top of Recent."""
         self.session.transcription_complete.emit("hello world")
-        self.assertEqual(recent_labels(self.tray)[0], "hello world")
+        self.assertEqual(recent_labels(self.stt._system_tray)[0], "hello world")
 
     def test_disabling_save_history_forgets_and_persists(self) -> None:
         """Unchecking Save history deletes the file, empties Recent, stops saving, and is remembered."""
         self.session.transcription_complete.emit("hello world")
-        menu_action(self.tray, "Save history").trigger()
+        menu_action(self.stt._system_tray, "Save history").trigger()
         self.session.transcription_complete.emit("after")
         settings = json.loads((self.folder / "settings.json").read_text(encoding="utf-8"))
-        self.assertEqual(((self.folder / "history.json").exists(), recent_labels(self.tray), menu_action(self.tray, "Recent").isEnabled(), settings["save_history"]), (False, [], False, False))
+        self.assertEqual(((self.folder / "history.json").exists(), recent_labels(self.stt._system_tray), menu_action(self.stt._system_tray, "Recent").isEnabled(), settings["save_history"]), (False, [], False, False))
 
     def test_clear_history_empties_recent_and_deletes_file(self) -> None:
         """Clear history removes every entry from the menu and the disk."""
         self.session.transcription_complete.emit("hello world")
-        menu_action(self.tray, "Clear history").trigger()
-        self.assertEqual(((self.folder / "history.json").exists(), recent_labels(self.tray), menu_action(self.tray, "Recent").isEnabled()), (False, [], False))
+        menu_action(self.stt._system_tray, "Clear history").trigger()
+        self.assertEqual(((self.folder / "history.json").exists(), recent_labels(self.stt._system_tray), menu_action(self.stt._system_tray, "Recent").isEnabled()), (False, [], False))
 
 
 if __name__ == "__main__":

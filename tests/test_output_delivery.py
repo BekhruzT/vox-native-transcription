@@ -139,6 +139,17 @@ class DeliveryTests(unittest.TestCase):
         worker.finished_recording.emit()
         self.assertEqual((injector.deliveries, completions), ([], []))
 
+    def test_worker_error_publishes_nothing(self) -> None:
+        """A worker error drops the session, so the worker's later finish signal publishes no partial text."""
+        session, injector = self.make_session((1, 2))
+        worker = session._worker
+        completions: list[str] = []
+        session.transcription_complete.connect(completions.append)
+        session._on_text_update(output(TranscriptionOutputType.CUMULATIVE, TranscriptionStatus.IN_PROGRESS, "unfinished"))
+        session._on_error("provider failed")
+        worker.finished_recording.emit()
+        self.assertEqual((injector.deliveries, completions), ([], []))
+
     def test_worker_error_does_not_become_synthetic_complete(self) -> None:
         """The worker must not convert a provider error into a completed transcript."""
         provider = Mock()
