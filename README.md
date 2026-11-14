@@ -72,6 +72,7 @@ Launch `Vox.exe`. You'll see a waveform icon appear in your system tray.
 | **Stop Recording** | Press `Win+Alt+J` again |
 | **Copy Transcription** | Click the toast notification |
 | **Where text goes** | Clipboard, plus automatic paste into a confirmed focused text field |
+| **Recent Transcriptions** | Right-click tray icon → Recent, then click an entry to copy it; Clear history forgets them and unchecking Save history stops keeping them |
 | **Open Settings** | Right-click tray icon → Settings |
 | **Exit** | Right-click tray icon → Exit |
 
@@ -96,6 +97,7 @@ Settings are stored in `%APPDATA%\InputSTT\settings.json`:
 | `hotkey` | `Win+Alt+J` | Global hotkey to toggle recording |
 | `language` | `en` | Transcription language code |
 | `audio_device` | System default | Microphone to use |
+| `save_history` | `true` | Keep the last 20 transcriptions (up to 7 days) in `history.json` next to `settings.json` |
 
 ## Building from Source
 
