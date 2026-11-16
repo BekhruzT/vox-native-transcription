@@ -6,6 +6,7 @@ from typing import Optional
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QObject, Signal, Slot
 
+from ..config.history import History
 from ..config.settings import Settings
 from ..core.hotkey_manager import HotkeyManager
 from ..core.focus_detector import FocusDetector
@@ -33,6 +34,7 @@ class STTApplication(QObject):
         
         # Load settings
         self._settings = Settings()
+        self._history = History(self._settings.config_file.parent, self._settings.get("save_history"))
         
         # Initialize components
         self._hotkey_manager: Optional[HotkeyManager] = None
@@ -96,10 +98,13 @@ class STTApplication(QObject):
                 print(f"Warning: Failed to register hotkey '{hotkey}'")
             
             # Initialize system tray
-            self._system_tray = SystemTray(self)
+            self._system_tray = SystemTray(self, self._settings.get("save_history"))
             self._system_tray.toggle_recording_requested.connect(self._on_toggle_recording)
             self._system_tray.settings_requested.connect(self._on_settings_requested)
+            self._system_tray.clear_history_requested.connect(self._on_clear_history)
+            self._system_tray.save_history_toggled.connect(self._on_save_history_toggled)
             self._system_tray.exit_requested.connect(self._on_exit_requested)
+            self._system_tray.set_recent(self._history.recent())
             
             # Initialize overlays
             self._init_overlays()
@@ -221,9 +226,26 @@ class STTApplication(QObject):
     @Slot(str)
     def _on_transcription_complete(self, text: str) -> None:
         """Handle transcription session completion."""
+        self._history.add(text)
+        if self._system_tray:
+            self._system_tray.set_recent(self._history.recent())
         # Emit for external listeners
         self.text_ready.emit(text)
-        
+    
+    @Slot()
+    def _on_clear_history(self) -> None:
+        """Forget every saved transcription."""
+        self._history.clear()
+        self._system_tray.set_recent([])
+    
+    @Slot(bool)
+    def _on_save_history_toggled(self, enabled: bool) -> None:
+        """Turn history saving on or off and remember the choice."""
+        self._history.set_enabled(enabled)
+        self._system_tray.set_recent(self._history.recent())
+        self._settings.set("save_history", enabled)
+        self._settings.save()
+
     
     @Slot(str)
     def _on_session_error(self, message: str) -> None:

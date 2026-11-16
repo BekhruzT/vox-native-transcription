@@ -23,6 +23,9 @@ class FakeWorker(QObject):
     def start(self) -> None:
         """Keep the test worker idle."""
 
+    def request_stop(self) -> None:
+        """Accept a stop request without audio activity."""
+
 
 class FakeDetector:
     """Expose a controlled focused target to the real session."""
@@ -124,6 +127,28 @@ class DeliveryTests(unittest.TestCase):
         session._on_text_update(output(TranscriptionOutputType.CUMULATIVE, TranscriptionStatus.ERROR, "unfinished"))
         session._on_recording_finished()
         self.assertEqual(injector.deliveries, [])
+
+    def test_cancel_publishes_nothing(self) -> None:
+        """A cancelled session ignores the worker's later finish signal."""
+        session, injector = self.make_session((1, 2))
+        worker = session._worker
+        completions: list[str] = []
+        session.transcription_complete.connect(completions.append)
+        session._on_text_update(output(TranscriptionOutputType.CUMULATIVE, TranscriptionStatus.COMPLETE, "hello world"))
+        session.cancel()
+        worker.finished_recording.emit()
+        self.assertEqual((injector.deliveries, completions), ([], []))
+
+    def test_worker_error_publishes_nothing(self) -> None:
+        """A worker error drops the session, so the worker's later finish signal publishes no partial text."""
+        session, injector = self.make_session((1, 2))
+        worker = session._worker
+        completions: list[str] = []
+        session.transcription_complete.connect(completions.append)
+        session._on_text_update(output(TranscriptionOutputType.CUMULATIVE, TranscriptionStatus.IN_PROGRESS, "unfinished"))
+        session._on_error("provider failed")
+        worker.finished_recording.emit()
+        self.assertEqual((injector.deliveries, completions), ([], []))
 
     def test_worker_error_does_not_become_synthetic_complete(self) -> None:
         """The worker must not convert a provider error into a completed transcript."""
