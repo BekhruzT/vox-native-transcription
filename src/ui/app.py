@@ -252,9 +252,8 @@ class STTApplication(QObject):
         """Handle session error."""
         print(f"[ERROR] Session error: {message}")
         
-        # Hide toast
         if self._toast:
-            self._toast.hide_toast()
+            self._toast.show_toast(message)
         
         # Update tray
         if self._system_tray:
